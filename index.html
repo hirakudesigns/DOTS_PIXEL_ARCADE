@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>DOTS PIXEL ARCADE</title>
+
+  <!-- Google Fonts: Retro & Arcade Style -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700;900&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            pixel: ['"Press Start 2P"', 'monospace'],
+            vt: ['"VT323"', 'monospace'],
+            arcade: ['"Chakra Petch"', 'sans-serif'],
+          },
+          colors: {
+            arcade: {
+              bg: '#0a0814',
+              card: '#161228',
+              pink: '#ff0055',
+              cyan: '#00f0ff',
+              amber: '#ffb700',
+              purple: '#9d4edd',
+              green: '#00ff66',
+              gray: '#4b5563'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    body {
+      background-color: #05030a;
+      color: #ffffff;
+      font-family: 'Chakra Petch', sans-serif;
+      overflow: hidden;
+      min-height: 100vh;
+    }
+
+    /* CRT Scanlines Overlay */
+    .scanlines {
+      background: linear-gradient(
+        rgba(18, 16, 16, 0) 50%, 
+        rgba(0, 0, 0, 0.35) 50%
+      );
+      background-size: 100% 4px;
+      pointer-events: none;
+    }
+
+    /* Neon Glow Effects */
+    .glow-cyan { text-shadow: 0 0 8px rgba(0, 240, 255, 0.8), 0 0 20px rgba(0, 240, 255, 0.4); }
+    .glow-pink { text-shadow: 0 0 8px rgba(255, 0, 85, 0.8), 0 0 20px rgba(255, 0, 85, 0.4); }
+    .glow-amber { text-shadow: 0 0 8px rgba(255, 183, 0, 0.8), 0 0 20px rgba(255, 183, 0, 0.4); }
+
+    .border-glow-cyan { box-shadow: 0 0 15px rgba(0, 240, 255, 0.4), inset 0 0 15px rgba(0, 240, 255, 0.2); }
+    .border-glow-pink { box-shadow: 0 0 20px rgba(255, 0, 85, 0.5), inset 0 0 20px rgba(255, 0, 85, 0.2); }
+
+    /* 3D Carousel Perspective Container */
+    .carousel-stage {
+      perspective: 1200px;
+      transform-style: preserve-3d;
+    }
+
+    /* Glassmorphism Card Style */
+    .arcade-card {
+      background: linear-gradient(145deg, rgba(22, 18, 40, 0.9) 0%, rgba(10, 8, 20, 0.95) 100%);
+      backdrop-filter: blur(8px);
+      transition: border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+    }
+
+    /* Dynamic hold circle animation */
+    .progress-ring__circle {
+      transition: stroke-dashoffset 0.1s linear;
+      transform: rotate(-90deg);
+      transform-origin: 50% 50%;
+    }
+
+    /* Background Canvas */
+    #gridCanvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body class="flex flex-col h-screen w-screen overflow-hidden relative">
+
+  <canvas id="gridCanvas"></canvas>
+  <div class="scanlines absolute inset-0 z-50"></div>
+
+  <header class="relative z-30 flex items-center justify-between px-6 py-4 border-b border-arcade-cyan/20 bg-arcade-bg/80 backdrop-blur-md shrink-0">
+    <div class="flex items-center space-x-3">
+      <div class="w-9 h-9 rounded bg-gradient-to-br from-arcade-pink to-arcade-purple flex items-center justify-center font-pixel text-xl shadow-lg border border-white/20 animate-pulse">
+        ●
+      </div>
+      <div>
+        <h1 class="font-pixel text-lg md:text-xl tracking-wider text-transparent bg-clip-text bg-gradient-to-r from-arcade-cyan via-white to-arcade-pink glow-cyan">
+          DOTS PIXEL ARCADE
+        </h1>
+        <p class="text-xs font-vt tracking-widest text-arcade-cyan/70">BALANCE BOARD TILT SELECTION PORTAL</p>
+      </div>
+    </div>
+
+    <!-- Mode & Status Indicators -->
+    <div class="flex items-center space-x-3">
+      <!-- Node.js WebSocket Status Indicator -->
+      <button id="wsConnectModalBtn" class="flex items-center space-x-2 bg-black/60 border border-white/20 px-3 py-1.5 rounded-full text-xs font-arcade hover:border-arcade-cyan transition-all">
+        <span id="wsStatusDot" class="w-2.5 h-2.5 rounded-full bg-red-500"></span>
+        <span id="wsStatusText" class="text-gray-300 font-vt">NODE WS: OFF</span>
+      </button>
+
+      <!-- Mode Selector -->
+      <button id="toggleDeviceBtn" class="px-4 py-1.5 rounded-lg border border-arcade-pink/50 bg-arcade-pink/10 hover:bg-arcade-pink/30 text-xs font-pixel text-arcade-pink transition-all">
+        🎮 PC画面 / 📱 スマホ切替
+      </button>
+    </div>
+  </header>
+
+  <main id="pcMainView" class="relative z-20 flex-1 flex flex-col items-center justify-between p-4 overflow-hidden">
+
+    <!-- Instruction Badge -->
+    <div class="text-center mt-2 z-30">
+      <div id="instructionBadge" class="inline-flex items-center gap-2 px-5 py-2 rounded-full bg-arcade-card/90 border border-arcade-cyan/40 shadow-lg border-glow-cyan">
+        <span class="text-xl">⚖️</span>
+        <span class="text-sm md:text-base font-bold text-arcade-cyan">
+          左右に傾けて選択 ➔ <span class="text-arcade-amber font-pixel text-xs underline decoration-2 underline-offset-4">中央で3秒間固定</span> で決定！
+        </span>
+      </div>
+    </div>
+
+    <!-- Carousel Container Stage -->
+    <div class="carousel-stage relative w-full flex-1 flex items-center justify-center my-2 max-w-6xl">
+      
+      <!-- Selection Hold Ring Overlay -->
+      <div id="holdIndicator" class="absolute z-40 pointer-events-none flex flex-col items-center justify-center opacity-0 transition-opacity duration-200">
+        <div class="relative flex items-center justify-center">
+          <svg class="w-48 h-48 md:w-56 md:h-56">
+            <circle class="text-black/60" stroke-width="12" stroke="currentColor" fill="transparent" r="80" cx="50%" cy="50%" />
+            <circle id="progressCircle" class="progress-ring__circle text-arcade-amber" stroke-width="12" 
+                    stroke-dasharray="502" stroke-dashoffset="502" stroke-linecap="round" stroke="currentColor" fill="transparent" r="80" cx="50%" cy="50%" />
+          </svg>
+          <div class="absolute flex flex-col items-center">
+            <span id="countdownText" class="font-pixel text-3xl md:text-4xl text-arcade-amber glow-amber">3</span>
+            <span id="holdLabelText" class="font-pixel text-[10px] text-white tracking-widest mt-1">HOLD STILL!</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dynamic Carousel Track -->
+      <div id="carouselTrack" class="relative w-full h-full flex items-center justify-center transition-transform duration-300 ease-out"></div>
+    </div>
+
+    <!-- Balance Board HUD Indicator -->
+    <div class="w-full max-w-2xl bg-arcade-card/90 border border-white/10 rounded-2xl p-3 backdrop-blur-md z-30 flex flex-col items-center gap-2 shadow-2xl">
+      <div class="flex items-center justify-between w-full text-xs font-vt tracking-wider text-gray-400 px-2">
+        <span class="flex items-center gap-1"><span class="text-arcade-cyan">◀</span> LEFT TILT</span>
+        <span class="text-arcade-amber font-bold flex items-center gap-2">
+          BALANCE TILT: <span id="tiltAngleDisplay" class="font-pixel text-white text-sm">0.0°</span>
+        </span>
+        <span class="flex items-center gap-1">RIGHT TILT <span class="text-arcade-pink">▶</span></span>
+      </div>
+
+      <!-- Level Bar -->
+      <div class="relative w-full h-8 bg-black/60 rounded-xl border border-white/20 p-1 flex items-center overflow-hidden">
+        <div class="absolute left-1/2 -translate-x-1/2 w-20 h-full bg-arcade-amber/20 border-x border-arcade-amber/60 z-0 flex items-center justify-center">
+          <span class="text-[9px] font-pixel text-arcade-amber/80 tracking-tighter">SELECT ZONE</span>
+        </div>
+        <div id="tiltBubble" class="absolute left-1/2 -translate-x-1/2 w-10 h-6 bg-gradient-to-r from-arcade-cyan to-arcade-pink rounded-lg border border-white shadow-lg transition-all duration-75 flex items-center justify-center z-10">
+          <div class="w-2 h-2 rounded-full bg-white animate-pulse"></div>
+        </div>
+      </div>
+
+      <!-- Controls & Calibration Bar -->
+      <div class="flex items-center justify-between w-full text-[11px] font-arcade text-gray-400 pt-1">
+        <span>キーボード: <kbd class="px-1.5 py-0.5 bg-gray-800 border border-gray-600 rounded text-white">←</kbd> <kbd class="px-1.5 py-0.5 bg-gray-800 border border-gray-600 rounded text-white">→</kbd> 矢印キー操作</span>
+        <button id="resetTiltBtn" class="text-arcade-cyan hover:underline font-bold">🎯 水平キャリブレーション</button>
+      </div>
+    </div>
+  </main>
+
+  <div id="mobileControllerView" class="hidden relative z-40 flex-1 flex-col items-center justify-center p-6 text-center">
+    <div class="max-w-md w-full bg-arcade-card border border-arcade-cyan/40 rounded-3xl p-6 shadow-2xl flex flex-col items-center gap-5">
+      <div class="w-16 h-16 rounded-2xl bg-arcade-cyan/10 border border-arcade-cyan flex items-center justify-center text-3xl">
+        📱
+      </div>
+      <div>
+        <h2 class="font-pixel text-lg text-arcade-cyan mb-1">BALANCE REMOTE</h2>
+        <p class="text-xs text-gray-300 leading-relaxed font-arcade">
+          スマホを横にしてバランスボードに固定し、傾けて操作します。
+        </p>
+      </div>
+
+      <button id="enableSensorsBtn" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-arcade-pink to-arcade-purple text-white font-pixel text-xs tracking-wider border border-white/20 shadow-lg active:scale-95 transition-all">
+        🚀 傾きセンサーを開始する
+      </button>
+
+      <!-- WebSocket Quick Connect Box on Mobile -->
+      <div class="w-full bg-black/60 rounded-2xl p-4 border border-white/10 text-left font-vt text-xs space-y-2">
+        <div class="text-arcade-cyan font-bold tracking-wider">📡 NODE.JS サーバーリアルタイム送信</div>
+        <div class="flex gap-2">
+          <input id="mobileWsIpInput" type="text" placeholder="例: 192.168.1.10:8080" class="flex-1 bg-gray-900 border border-gray-700 px-3 py-1.5 rounded text-white font-mono text-xs focus:outline-none focus:border-arcade-cyan">
+          <button id="mobileWsConnectBtn" class="bg-arcade-cyan text-black px-3 py-1.5 rounded font-bold hover:brightness-110">接続</button>
+        </div>
+        <div class="flex justify-between text-arcade-amber pt-1">
+          <span>ジャイロ (Gamma):</span>
+          <span id="mobileTiltVal" class="font-bold">0.0°</span>
+        </div>
+        <div class="flex justify-between text-gray-400">
+          <span>サーバー通信:</span>
+          <span id="mobileStatusVal" class="text-red-400 font-bold">未接続</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="wsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300 p-4">
+    <div class="bg-arcade-card border border-arcade-cyan rounded-3xl p-6 max-w-md w-full shadow-2xl">
+      <h3 class="font-pixel text-sm text-arcade-cyan mb-2">📡 Node.js WebSocket 連携設定</h3>
+      <p class="text-xs text-gray-300 font-arcade mb-4 leading-relaxed">
+        PCのターミナルで <code class="text-arcade-amber bg-black px-1.5 py-0.5 rounded">node server.js</code> を実行し、表示されたIPアドレスを入力してください。
+      </p>
+
+      <div class="mb-4">
+        <label class="block text-xs font-vt text-gray-400 mb-1">Server Address (IP:Port):</label>
+        <input id="wsIpInput" type="text" placeholder="192.168.x.x:8080" value="localhost:8080" class="w-full bg-black/80 border border-white/20 rounded-xl px-4 py-2 text-white font-mono text-sm focus:outline-none focus:border-arcade-cyan">
+      </div>
+
+      <div class="flex justify-end gap-3">
+        <button id="closeWsModalBtn" class="px-4 py-2 rounded-xl bg-gray-800 text-xs font-pixel text-white hover:bg-gray-700">キャンセル</button>
+        <button id="connectWsBtn" class="px-5 py-2 rounded-xl bg-arcade-cyan text-black text-xs font-pixel hover:brightness-110 font-bold">接続開始</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="gameLaunchModal" class="fixed inset-0 z-50 bg-black/90 backdrop-blur-xl flex flex-col items-center justify-center opacity-0 pointer-events-none transition-opacity duration-300 p-6">
+    <div class="relative w-full max-w-4xl bg-arcade-card border-2 border-arcade-pink rounded-3xl p-8 shadow-2xl border-glow-pink flex flex-col items-center text-center overflow-hidden">
+      
+      <div id="modalBadge" class="inline-block px-4 py-1 rounded-full bg-arcade-pink/20 border border-arcade-pink text-arcade-pink font-pixel text-xs mb-4 animate-bounce">
+        ★ GAME LAUNCHED ★
+      </div>
+
+      <div id="modalGameIcon" class="text-6xl mb-3">🎈</div>
+      <h2 id="modalGameTitle" class="font-pixel text-2xl md:text-3xl text-white mb-2 glow-pink">PIXEL BALLOON JUMP</h2>
+      <p id="modalGameDesc" class="text-sm md:text-base text-gray-300 font-arcade max-w-xl mb-6">
+        左右交互に傾けて風船をポンピング！
+      </p>
+
+      <div id="simulatedGameScreen" class="w-full h-64 md:h-80 bg-black/80 rounded-2xl border border-white/20 relative flex items-center justify-center overflow-hidden mb-6">
+        <div class="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-b from-purple-900/40 to-black">
+          <div id="modalScreenIcon" class="text-5xl animate-bounce mb-2">🕹️</div>
+          <p id="modalScreenText" class="font-pixel text-xs text-arcade-cyan animate-pulse">GAME LOADING & INITIALIZING...</p>
+        </div>
+      </div>
+
+      <div class="flex gap-4">
+        <button id="closeModalBtn" class="px-6 py-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-white font-pixel text-xs border border-white/20 transition-all">
+          🔙 ポータルに戻る
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ==========================================
+       1. GAME DATA CATALOG (Includes STAY slot)
+       ========================================== */
+    const GAMES_CATALOG = [
+      {
+        id: 'stay',
+        title: 'STAY / STANDBY',
+        category: 'NEUTRAL STATE',
+        icon: '⏸️️',
+        color: '#6b7280',
+        badge: 'IDLE',
+        isStay: true,
+        desc: '現在ゲームは未選択です。ボードを左右に傾けて遊ぶゲームを探してみよう！',
+        stats: { players: 'Standby', difficulty: '-', score: '-' }
+      },
+      {
+        id: 'balloon',
+        title: 'PIXEL BALLOON JUMP',
+        category: 'BALANCE PUMP ACTION',
+        icon: '🎈',
+        color: '#ff0055',
+        badge: 'POPULAR',
+        isStay: false,
+        desc: 'ボードの上に乗り左右交互に傾けて風船を充填！大気圏を突破して惑星へジャンプ！',
+        stats: { players: '1 Player', difficulty: 'EASY', score: '384,000 km' }
+      },
+      {
+        id: 'skate',
+        title: 'CYBER SKATE BALANCE',
+        category: 'HIGH SPEED RIDER',
+        icon: '🛹',
+        color: '#00f0ff',
+        badge: 'NEW',
+        isStay: false,
+        desc: 'サイバーパンクシティのハイウェイを絶妙な体重移動で滑走するエクストリームライド！',
+        stats: { players: '1-2 Players', difficulty: 'HARD', score: '99,400 pts' }
+      },
+      {
+        id: 'space',
+        title: 'RETRO SPACE TILT',
+        category: 'GRAVITY SHOOTER',
+        icon: '🚀',
+        color: '#ffb700',
+        badge: 'HOT',
+        isStay: false,
+        desc: '機体の左右傾きで重力場をコントロール。小惑星の群れを回避しながらコアを狙え！',
+        stats: { players: '1 Player', difficulty: 'MEDIUM', score: '1,250,000' }
+      },
+      {
+        id: 'dino',
+        title: 'PIXEL DINO ROLL',
+        category: 'PHYSICS PUZZLE',
+        icon: '🦖',
+        color: '#00ff66',
+        badge: 'CLASSIC',
+        isStay: false,
+        desc: 'たまご型の恐竜を傾き操作で転がして障害物をクリア。転落に気をつけよう！',
+        stats: { players: '1 Player', difficulty: 'EASY', score: 'STAGE 24' }
+      },
+      {
+        id: 'racer',
+        title: 'TILT GALAXY RACER',
+        category: 'NEON RACING',
+        icon: '🏎️',
+        color: '#9d4edd',
+        badge: 'SPEED',
+        isStay: false,
+        desc: 'ネオンコースを傾きステアリングで超高速ドライブ。ドリフトを決めてタイムアタック！',
+        stats: { players: '1 Player', difficulty: 'HARD', score: '1:12.40' }
+      }
+    ];
+
+    /* ==========================================
+       2. AUDIO SYNTHESIZER
+       ========================================== */
+    class SoundFX {
+      constructor() { this.ctx = null; }
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+      }
+      playTick() {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(440, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, this.ctx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.05);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.05);
+      }
+      playHoldBeep(progress) {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(300 + progress * 600, this.ctx.currentTime);
+        gain.gain.setValueAtTime(0.05, this.ctx.currentTime);
+        gain.gain.linearRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.08);
+      }
+      playSuccess() {
+        if (!this.ctx) return;
+        const notes = [523.25, 659.25, 783.99, 1046.50];
+        notes.forEach((freq, idx) => {
+          setTimeout(() => {
+            if (!this.ctx) return;
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime);
+            gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.2);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start();
+            osc.stop(this.ctx.currentTime + 0.2);
+          }, idx * 80);
+        });
+      }
+    }
+    const sfx = new SoundFX();
+
+    /* ==========================================
+       3. STATE MANAGEMENT
+       ========================================== */
+    let currentTilt = 0;
+    let targetTilt = 0;
+    let tiltOffset = 0;
+    let activeCardIndex = 0; // Starts at STAY card
+    let carouselRotationAngle = 0;
+    
+    let holdTimer = 0;
+    const REQUIRED_HOLD_TIME = 3.0;
+    let isGameLaunched = false;
+    let lastTime = performance.now();
+
+    // WebSocket Instance
+    let ws = null;
+
+    // DOM References
+    const carouselTrack = document.getElementById('carouselTrack');
+    const tiltBubble = document.getElementById('tiltBubble');
+    const tiltAngleDisplay = document.getElementById('tiltAngleDisplay');
+    const holdIndicator = document.getElementById('holdIndicator');
+    const progressCircle = document.getElementById('progressCircle');
+    const countdownText = document.getElementById('countdownText');
+    const gameLaunchModal = document.getElementById('gameLaunchModal');
+
+    const radius = 80;
+    const circumference = 2 * Math.PI * radius;
+    progressCircle.style.strokeDasharray = `${circumference}`;
+    progressCircle.style.strokeDashoffset = `${circumference}`;
+
+    /* ==========================================
+       4. CAROUSEL RENDERING
+       ========================================== */
+    function renderCarouselCards() {
+      carouselTrack.innerHTML = '';
+      const totalCards = GAMES_CATALOG.length;
+      const angleStep = 360 / totalCards;
+      const radiusPx = Math.min(window.innerWidth * 0.35, 380);
+
+      GAMES_CATALOG.forEach((game, idx) => {
+        const cardAngle = (idx * angleStep) + carouselRotationAngle;
+        const rad = (cardAngle * Math.PI) / 180;
+        
+        const x = Math.sin(rad) * radiusPx;
+        const z = Math.cos(rad) * radiusPx;
+        const scale = Math.max(0.65, (z + radiusPx) / (2 * radiusPx));
+        const opacity = Math.max(0.3, scale);
+        
+        const isFocused = idx === activeCardIndex;
+
+        const card = document.createElement('div');
+        const borderColor = game.isStay ? 'border-gray-500' : 'border-arcade-pink';
+        const glowClass = game.isStay ? 'shadow-gray-500/30' : 'border-glow-pink';
+
+        card.className = `absolute arcade-card w-72 md:w-80 p-6 rounded-3xl border-2 transition-all duration-300 cursor-pointer flex flex-col justify-between ${
+          isFocused 
+            ? `${borderColor} shadow-2xl ${glowClass} z-30` 
+            : 'border-white/10 opacity-70 z-10'
+        }`;
+
+        card.style.transform = `translate3d(${x}px, 0px, ${z}px) scale(${scale})`;
+        card.style.opacity = opacity;
+
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <span class="px-2.5 py-0.5 rounded-full text-[10px] font-pixel ${game.isStay ? 'bg-gray-800 text-gray-300 border-gray-600' : 'bg-arcade-pink/20 text-arcade-pink border-arcade-pink/40'} border">
+                ${game.badge}
+              </span>
+              <span class="text-xs font-vt text-gray-400 tracking-wider">${game.category}</span>
+            </div>
+
+            <div class="text-5xl md:text-6xl my-4 text-center transform hover:scale-110 transition-transform">
+              ${game.icon}
+            </div>
+
+            <h3 class="font-pixel text-base md:text-lg text-center ${game.isStay ? 'text-gray-300' : 'text-white'} mb-2 leading-snug">
+              ${game.title}
+            </h3>
+
+            <p class="text-xs font-arcade text-gray-300 text-center leading-relaxed line-clamp-2">
+              ${game.desc}
+            </p>
+          </div>
+
+          <div class="mt-6 pt-4 border-t border-white/10 flex justify-between items-center text-[11px] font-vt text-gray-400">
+            <span>🎮 ${game.stats.players}</span>
+            <span class="text-arcade-amber">${game.isStay ? 'STATUS: IDLE' : 'HIGH: ' + game.stats.score}</span>
+          </div>
+        `;
+
+        card.addEventListener('click', () => {
+          sfx.init();
+          activeCardIndex = idx;
+          carouselRotationAngle = - (idx * angleStep);
+          renderCarouselCards();
+        });
+
+        carouselTrack.appendChild(card);
+      });
+    }
+
+    /* ==========================================
+       5. INPUT & PHYSICS ENGINE
+       ========================================== */
+    const keys = {};
+    window.addEventListener('keydown', (e) => { sfx.init(); keys[e.key] = true; });
+    window.addEventListener('keyup', (e) => { keys[e.key] = false; });
+
+    function updateTiltPhysics() {
+      if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
+        targetTilt = -20;
+      } else if (keys['ArrowRight'] || keys['d'] || keys['D']) {
+        targetTilt = 20;
+      } else {
+        if (!window.isGyroActive) {
+          targetTilt = targetTilt * 0.85;
+        }
+      }
+
+      currentTilt += (targetTilt - currentTilt) * 0.15;
+      const effectiveTilt = currentTilt - tiltOffset;
+
+      const maxAngle = 25;
+      const clampedTilt = Math.max(-maxAngle, Math.min(maxAngle, effectiveTilt));
+      const bubblePercent = 50 + (clampedTilt / maxAngle) * 40;
+      
+      tiltBubble.style.left = `${bubblePercent}%`;
+      tiltAngleDisplay.innerText = `${effectiveTilt.toFixed(1)}°`;
+
+      if (!isGameLaunched) {
+        if (Math.abs(effectiveTilt) > 8) {
+          const rotationSpeed = effectiveTilt * 0.08;
+          carouselRotationAngle -= rotationSpeed;
+
+          const totalCards = GAMES_CATALOG.length;
+          const angleStep = 360 / totalCards;
+          let normalizedAngle = (-carouselRotationAngle) % 360;
+          if (normalizedAngle < 0) normalizedAngle += 360;
+
+          const newIndex = Math.round(normalizedAngle / angleStep) % totalCards;
+          if (newIndex !== activeCardIndex) {
+            activeCardIndex = newIndex;
+            sfx.playTick();
+          }
+        }
+      }
+
+      renderCarouselCards();
+      return effectiveTilt;
+    }
+
+    /* ==========================================
+       6. 3-SECOND HOLD SELECTION LOGIC
+       ========================================== */
+    function processHoldSelection(effectiveTilt, deltaSec) {
+      if (isGameLaunched) return;
+
+      // STAY/STANDBYカード選択時はカウントダウンを開始しない
+      const currentGame = GAMES_CATALOG[activeCardIndex];
+      if (currentGame && currentGame.isStay) {
+        holdTimer = 0;
+        holdIndicator.style.opacity = '0';
+        return;
+      }
+
+      const isInSelectZone = Math.abs(effectiveTilt) <= 5.0;
+
+      if (isInSelectZone) {
+        holdTimer += deltaSec;
+        if (holdTimer > REQUIRED_HOLD_TIME) holdTimer = REQUIRED_HOLD_TIME;
+
+        holdIndicator.style.opacity = '1';
+        
+        const progressRatio = holdTimer / REQUIRED_HOLD_TIME;
+        progressCircle.style.strokeDashoffset = circumference - (progressRatio * circumference);
+
+        const remainingSec = Math.ceil(REQUIRED_HOLD_TIME - holdTimer);
+        countdownText.innerText = remainingSec > 0 ? remainingSec : 'GO!';
+
+        if (Math.floor(holdTimer * 10) % 3 === 0) {
+          sfx.playHoldBeep(progressRatio);
+        }
+
+        if (holdTimer >= REQUIRED_HOLD_TIME) {
+          launchSelectedGame();
+        }
+      } else {
+        holdTimer = Math.max(0, holdTimer - deltaSec * 3);
+        if (holdTimer === 0) {
+          holdIndicator.style.opacity = '0';
+        } else {
+          const progressRatio = holdTimer / REQUIRED_HOLD_TIME;
+          progressCircle.style.strokeDashoffset = circumference - (progressRatio * circumference);
+        }
+      }
+    }
+
+    function launchSelectedGame() {
+      isGameLaunched = true;
+      sfx.playSuccess();
+
+      const game = GAMES_CATALOG[activeCardIndex];
+      
+      document.getElementById('modalGameIcon').innerText = game.icon;
+      document.getElementById('modalGameTitle').innerText = game.title;
+      document.getElementById('modalGameDesc').innerText = game.desc;
+
+      const modalBadge = document.getElementById('modalBadge');
+      const modalScreenIcon = document.getElementById('modalScreenIcon');
+      const modalScreenText = document.getElementById('modalScreenText');
+
+      if (game.isStay) {
+        modalBadge.innerText = '⏸️ STANDBY MODE';
+        modalBadge.className = 'inline-block px-4 py-1 rounded-full bg-gray-800 text-gray-300 font-pixel text-xs mb-4 border border-gray-600';
+        modalScreenIcon.innerText = '☕';
+        modalScreenText.innerText = 'ゲーム待機中... 左右に傾けてゲームを選択してください';
+      } else {
+        modalBadge.innerText = '★ GAME LAUNCHED ★';
+        modalBadge.className = 'inline-block px-4 py-1 rounded-full bg-arcade-pink/20 border border-arcade-pink text-arcade-pink font-pixel text-xs mb-4 animate-bounce';
+        modalScreenIcon.innerText = '🕹️';
+        modalScreenText.innerText = 'GAME LOADING & INITIALIZING...';
+      }
+
+      gameLaunchModal.classList.remove('pointer-events-none', 'opacity-0');
+      gameLaunchModal.classList.add('opacity-100');
+    }
+
+    document.getElementById('closeModalBtn').addEventListener('click', () => {
+      gameLaunchModal.classList.add('pointer-events-none', 'opacity-0');
+      gameLaunchModal.classList.remove('opacity-100');
+      
+      setTimeout(() => {
+        isGameLaunched = false;
+        holdTimer = 0;
+        holdIndicator.style.opacity = '0';
+      }, 300);
+    });
+
+    document.getElementById('resetTiltBtn').addEventListener('click', () => {
+      tiltOffset = currentTilt;
+      sfx.playTick();
+    });
+
+    /* ==========================================
+       7. NODE.JS WEBSOCKET REALTIME CONNECTION
+       ========================================== */
+    function connectWebSocket(address) {
+      if (!address.startsWith('ws://') && !address.startsWith('wss://')) {
+        address = 'ws://' + address;
+      }
+
+      const wsStatusDot = document.getElementById('wsStatusDot');
+      const wsStatusText = document.getElementById('wsStatusText');
+      const mobileStatusVal = document.getElementById('mobileStatusVal');
+
+      try {
+        ws = new WebSocket(address);
+
+        ws.onopen = () => {
+          wsStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-arcade-green animate-ping';
+          wsStatusText.innerText = 'NODE WS: ONLINE';
+          if (mobileStatusVal) {
+            mobileStatusVal.innerText = 'ONLINE (リアルタイム同期中)';
+            mobileStatusVal.className = 'text-arcade-green font-bold';
+          }
+          document.getElementById('wsModal').classList.add('opacity-0', 'pointer-events-none');
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === 'tilt') {
+              targetTilt = data.value;
+              window.isGyroActive = true;
+            }
+          } catch(err){}
+        };
+
+        ws.onclose = () => {
+          wsStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
+          wsStatusText.innerText = 'NODE WS: OFF';
+          if (mobileStatusVal) {
+            mobileStatusVal.innerText = '切断されました';
+            mobileStatusVal.className = 'text-red-400 font-bold';
+          }
+        };
+
+        ws.onerror = () => {
+          wsStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
+          wsStatusText.innerText = 'NODE WS: ERROR';
+        };
+      } catch (err) {
+        console.error('WS Error:', err);
+      }
+    }
+
+    // Connect Modal Events
+    document.getElementById('wsConnectModalBtn').addEventListener('click', () => {
+      document.getElementById('wsModal').classList.remove('opacity-0', 'pointer-events-none');
+    });
+    document.getElementById('closeWsModalBtn').addEventListener('click', () => {
+      document.getElementById('wsModal').classList.add('opacity-0', 'pointer-events-none');
+    });
+    document.getElementById('connectWsBtn').addEventListener('click', () => {
+      const ip = document.getElementById('wsIpInput').value.trim();
+      if (ip) connectWebSocket(ip);
+    });
+    document.getElementById('mobileWsConnectBtn').addEventListener('click', () => {
+      const ip = document.getElementById('mobileWsIpInput').value.trim();
+      if (ip) connectWebSocket(ip);
+    });
+
+    /* ==========================================
+       8. GYROSCOPE & SENSOR HANDLERS
+       ========================================== */
+    const enableSensorsBtn = document.getElementById('enableSensorsBtn');
+    const mobileTiltVal = document.getElementById('mobileTiltVal');
+
+    function startGyroSensors() {
+      if (window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientation', (e) => {
+          let gamma = e.gamma || 0;
+          targetTilt = gamma;
+          window.isGyroActive = true;
+
+          if (mobileTiltVal) mobileTiltVal.innerText = `${gamma.toFixed(1)}°`;
+
+          // Broadcast tilt to WebSocket Node.js Server
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'tilt', value: gamma }));
+          }
+        }, true);
+      }
+    }
+
+    enableSensorsBtn.addEventListener('click', () => {
+      sfx.init();
+      if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission()
+          .then(state => {
+            if (state === 'granted') {
+              startGyroSensors();
+              enableSensorsBtn.innerText = '✅ 傾きセンサー稼働中！';
+            }
+          });
+      } else {
+        startGyroSensors();
+        enableSensorsBtn.innerText = '✅ 傾きセンサー稼働中！';
+      }
+    });
+
+    // Device View Toggle
+    const toggleDeviceBtn = document.getElementById('toggleDeviceBtn');
+    const pcMainView = document.getElementById('pcMainView');
+    const mobileControllerView = document.getElementById('mobileControllerView');
+
+    toggleDeviceBtn.addEventListener('click', () => {
+      sfx.init();
+      pcMainView.classList.toggle('hidden');
+      pcMainView.classList.toggle('flex');
+      mobileControllerView.classList.toggle('hidden');
+      mobileControllerView.classList.toggle('flex');
+    });
+
+    /* ==========================================
+       9. BACKGROUND CANVAS ANIMATION
+       ========================================== */
+    const canvas = document.getElementById('gridCanvas');
+    const ctx = canvas.getContext('2d');
+
+    function resizeCanvas() {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    let gridOffsetY = 0;
+    function drawRetroBackground() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, '#05030a');
+      grad.addColorStop(0.6, '#100826');
+      grad.addColorStop(1, '#240046');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.strokeStyle = 'rgba(0, 240, 255, 0.15)';
+      ctx.lineWidth = 1;
+
+      const horizon = canvas.height * 0.55;
+      const numLines = 24;
+
+      for (let i = -numLines; i <= numLines; i++) {
+        const x = (canvas.width / 2) + i * 40;
+        ctx.beginPath();
+        ctx.moveTo(canvas.width / 2, horizon);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+
+      gridOffsetY = (gridOffsetY + 0.8) % 30;
+      for (let y = horizon; y < canvas.height; y += 15) {
+        const lineY = y + gridOffsetY;
+        if (lineY <= canvas.height) {
+          ctx.beginPath();
+          ctx.moveTo(0, lineY);
+          ctx.lineTo(canvas.width, lineY);
+          ctx.stroke();
+        }
+      }
+    }
+
+    /* ==========================================
+       10. MAIN ANIMATION LOOP
+       ========================================== */
+    function mainLoop(time) {
+      const deltaSec = (time - lastTime) / 1000;
+      lastTime = time;
+
+      drawRetroBackground();
+      const tilt = updateTiltPhysics();
+      processHoldSelection(tilt, deltaSec);
+
+      requestAnimationFrame(mainLoop);
+    }
+
+    renderCarouselCards();
+    requestAnimationFrame(mainLoop);
+  </script>
+</body>
+</html>
