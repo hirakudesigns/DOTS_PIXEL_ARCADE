@@ -432,6 +432,8 @@
     let ws = null;
 
     // DOM References
+    const pcMainView = document.getElementById('pcMainView');
+    const mobileControllerView = document.getElementById('mobileControllerView');
     const carouselTrack = document.getElementById('carouselTrack');
     const tiltBubble = document.getElementById('tiltBubble');
     const tiltAngleDisplay = document.getElementById('tiltAngleDisplay');
@@ -449,6 +451,9 @@
        4. CAROUSEL RENDERING
        ========================================== */
     function renderCarouselCards() {
+      // PC画面が非表示の場合は描画スキップ
+      if (pcMainView.classList.contains('hidden')) return;
+
       carouselTrack.innerHTML = '';
       const totalCards = GAMES_CATALOG.length;
       const angleStep = 360 / totalCards;
@@ -525,6 +530,9 @@
     window.addEventListener('keyup', (e) => { keys[e.key] = false; });
 
     function updateTiltPhysics() {
+      // スマホコントローラー画面の時はPCビューの計算をスキップ
+      if (pcMainView.classList.contains('hidden')) return 0;
+
       if (keys['ArrowLeft'] || keys['a'] || keys['A']) {
         targetTilt = -20;
       } else if (keys['ArrowRight'] || keys['d'] || keys['D']) {
@@ -542,8 +550,8 @@
       const clampedTilt = Math.max(-maxAngle, Math.min(maxAngle, effectiveTilt));
       const bubblePercent = 50 + (clampedTilt / maxAngle) * 40;
       
-      tiltBubble.style.left = `${bubblePercent}%`;
-      tiltAngleDisplay.innerText = `${effectiveTilt.toFixed(1)}°`;
+      if (tiltBubble) tiltBubble.style.left = `${bubblePercent}%`;
+      if (tiltAngleDisplay) tiltAngleDisplay.innerText = `${effectiveTilt.toFixed(1)}°`;
 
       if (!isGameLaunched) {
         if (Math.abs(effectiveTilt) > 8) {
@@ -571,7 +579,7 @@
        6. 3-SECOND HOLD SELECTION LOGIC
        ========================================== */
     function processHoldSelection(effectiveTilt, deltaSec) {
-      if (isGameLaunched) return;
+      if (isGameLaunched || pcMainView.classList.contains('hidden')) return;
 
       // STAY/STANDBYカード選択時はカウントダウンを開始しない
       const currentGame = GAMES_CATALOG[activeCardIndex];
@@ -663,6 +671,7 @@
        7. NODE.JS WEBSOCKET REALTIME CONNECTION
        ========================================== */
     function connectWebSocket(address) {
+      if (!address) return;
       if (!address.startsWith('ws://') && !address.startsWith('wss://')) {
         address = 'ws://' + address;
       }
@@ -671,14 +680,27 @@
       const wsStatusText = document.getElementById('wsStatusText');
       const mobileStatusVal = document.getElementById('mobileStatusVal');
 
+      // 接続中の視覚的フィードバック
+      wsStatusText.innerText = 'CONNECTING...';
+      wsStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping';
+      if (mobileStatusVal) {
+        mobileStatusVal.innerText = '接続試行中...';
+        mobileStatusVal.className = 'text-arcade-amber font-bold animate-pulse';
+      }
+
+      if (ws) {
+        try { ws.close(); } catch(e){}
+      }
+
       try {
         ws = new WebSocket(address);
 
         ws.onopen = () => {
+          sfx.playSuccess();
           wsStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-arcade-green animate-ping';
           wsStatusText.innerText = 'NODE WS: ONLINE';
           if (mobileStatusVal) {
-            mobileStatusVal.innerText = 'ONLINE (リアルタイム同期中)';
+            mobileStatusVal.innerText = 'ONLINE (送信中)';
             mobileStatusVal.className = 'text-arcade-green font-bold';
           }
           document.getElementById('wsModal').classList.add('opacity-0', 'pointer-events-none');
@@ -688,6 +710,7 @@
           try {
             const data = JSON.parse(event.data);
             if (data.type === 'tilt') {
+              // PCビュー表示時のみ受信データでポータルを制御
               targetTilt = data.value;
               window.isGyroActive = true;
             }
@@ -698,32 +721,45 @@
           wsStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
           wsStatusText.innerText = 'NODE WS: OFF';
           if (mobileStatusVal) {
-            mobileStatusVal.innerText = '切断されました';
+            mobileStatusVal.innerText = '未接続 / 切断';
             mobileStatusVal.className = 'text-red-400 font-bold';
           }
         };
 
-        ws.onerror = () => {
+        ws.onerror = (err) => {
+          console.error('WS Connection Error:', err);
           wsStatusDot.className = 'w-2.5 h-2.5 rounded-full bg-red-500';
           wsStatusText.innerText = 'NODE WS: ERROR';
+          if (mobileStatusVal) {
+            mobileStatusVal.innerText = '接続エラー (IP確認)';
+            mobileStatusVal.className = 'text-red-400 font-bold';
+          }
         };
       } catch (err) {
-        console.error('WS Error:', err);
+        console.error('WS Setup Exception:', err);
+        if (mobileStatusVal) {
+          mobileStatusVal.innerText = '接続失敗';
+          mobileStatusVal.className = 'text-red-500 font-bold';
+        }
       }
     }
 
     // Connect Modal Events
     document.getElementById('wsConnectModalBtn').addEventListener('click', () => {
+      sfx.init();
       document.getElementById('wsModal').classList.remove('opacity-0', 'pointer-events-none');
     });
     document.getElementById('closeWsModalBtn').addEventListener('click', () => {
+      sfx.init();
       document.getElementById('wsModal').classList.add('opacity-0', 'pointer-events-none');
     });
     document.getElementById('connectWsBtn').addEventListener('click', () => {
+      sfx.init();
       const ip = document.getElementById('wsIpInput').value.trim();
       if (ip) connectWebSocket(ip);
     });
     document.getElementById('mobileWsConnectBtn').addEventListener('click', () => {
+      sfx.init();
       const ip = document.getElementById('mobileWsIpInput').value.trim();
       if (ip) connectWebSocket(ip);
     });
@@ -738,8 +774,12 @@
       if (window.DeviceOrientationEvent) {
         window.addEventListener('deviceorientation', (e) => {
           let gamma = e.gamma || 0;
-          targetTilt = gamma;
-          window.isGyroActive = true;
+
+          // スマホ画面表示時（リモコンモード）は、スマホ自身のポータルは動かさずデータ送信のみを行う
+          if (!pcMainView.classList.contains('hidden')) {
+            targetTilt = gamma;
+            window.isGyroActive = true;
+          }
 
           if (mobileTiltVal) mobileTiltVal.innerText = `${gamma.toFixed(1)}°`;
 
@@ -760,7 +800,8 @@
               startGyroSensors();
               enableSensorsBtn.innerText = '✅ 傾きセンサー稼働中！';
             }
-          });
+          })
+          .catch(console.error);
       } else {
         startGyroSensors();
         enableSensorsBtn.innerText = '✅ 傾きセンサー稼働中！';
@@ -768,16 +809,17 @@
     });
 
     // Device View Toggle
-    const toggleDeviceBtn = document.getElementById('toggleDeviceBtn');
-    const pcMainView = document.getElementById('pcMainView');
-    const mobileControllerView = document.getElementById('mobileControllerView');
-
     toggleDeviceBtn.addEventListener('click', () => {
       sfx.init();
       pcMainView.classList.toggle('hidden');
       pcMainView.classList.toggle('flex');
       mobileControllerView.classList.toggle('hidden');
       mobileControllerView.classList.toggle('flex');
+      
+      // PCビューに戻ったら再描画
+      if (!pcMainView.classList.contains('hidden')) {
+        renderCarouselCards();
+      }
     });
 
     /* ==========================================
